@@ -22,7 +22,7 @@ def get_config() -> GenerateConfig:
         load_in_8bit=False,
         load_in_4bit=False,
         center_crop=True,
-        num_open_loop_steps=NUM_ACTIONS_CHUNK,
+        num_open_loop_steps=8,
         unnorm_key="libero_object_no_noops",
     )
     return cfg

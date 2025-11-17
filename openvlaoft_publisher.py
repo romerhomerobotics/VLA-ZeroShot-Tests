@@ -107,7 +107,7 @@ class OpenVLAOFTPublisher(Node):
             bgr = self.bridge.imgmsg_to_cv2(msg, desired_encoding="bgr8")
             rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
 
-            cv2.imwrite("full_cam_debug.jpg", bgr)
+            #cv2.imwrite("full_cam_debug.jpg", bgr)
             with self._lock:
                 self._latest_full_rgb = rgb 
         except Exception as e:
@@ -118,7 +118,7 @@ class OpenVLAOFTPublisher(Node):
             bgr = self.bridge.imgmsg_to_cv2(msg, desired_encoding="bgr8")
             rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
 
-            cv2.imwrite("wrist_cam_debug.jpg", bgr)
+            #cv2.imwrite("wrist_cam_debug.jpg", bgr)
             with self._lock:
                 self._latest_wrist_rgb = rgb
 
@@ -178,6 +178,7 @@ class OpenVLAOFTPublisher(Node):
         # Call model to get action chunk
         try:
             if len(self._action_queue) == 0:
+                self.get_logger().info("The action queue is empty querying the model")
                 actions = self.model.predict_actions(observation, self._task_description)
                 self._action_queue.extend(actions)
 
