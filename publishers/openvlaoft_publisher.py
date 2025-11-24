@@ -35,6 +35,10 @@ try:
 except Exception:
     ActionEnsembler = None
 
+from libero_utils import prepare_observation
+from prismatic.vla.constants import NUM_ACTIONS_CHUNK
+from collections import deque
+
 
 def build_arg_parser():
     p = argparse.ArgumentParser("openvla_oft_publisher")
@@ -69,6 +73,8 @@ class OpenVLAOFTPublisher(Node):
         self._latest_proprio: Optional[np.ndarray] = None
         self._proprio_count: int = 0
         self._act_count: int = 0
+        self._replay_images: List = []
+        self._action_queue = deque(maxlen= NUM_ACTIONS_CHUNK)
 
         # Publishers / Subscribers
         self.pub_vel = self.create_publisher(Float64MultiArray, args.vel_topic, 10)
@@ -101,7 +107,7 @@ class OpenVLAOFTPublisher(Node):
             bgr = self.bridge.imgmsg_to_cv2(msg, desired_encoding="bgr8")
             rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
 
-            cv2.imwrite("full_cam_debug.jpg", bgr)
+            #cv2.imwrite("full_cam_debug.jpg", bgr)
             with self._lock:
                 self._latest_full_rgb = rgb 
         except Exception as e:
@@ -112,25 +118,13 @@ class OpenVLAOFTPublisher(Node):
             bgr = self.bridge.imgmsg_to_cv2(msg, desired_encoding="bgr8")
             rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
 
-            cv2.imwrite("wrist_cam_debug.jpg", bgr)
+            #cv2.imwrite("wrist_cam_debug.jpg", bgr)
             with self._lock:
                 self._latest_wrist_rgb = rgb
 
         except Exception as e:
             self.get_logger().error(f"Failed to process wrist camera image: {e}")
 
-    def _proprio_cb_jointstate(self, msg: Float64MultiArray):
-        try:
-            arr = np.asarray(msg.data, dtype=np.float32)
-            arr8 = np.zeros((8,), dtype = np.float32)
-            arr8[:-1] = arr[:-2]
-            arr8[-1] = 0 # fixed gripper state for now
-
-            with self._lock:
-                arr = np.concatenate((arr, np.array([0.0])), axis = -1)
-                self._latest_proprio = arr
-        except Exception as e:
-            self.get_logger().error(f"Failed to process proprio message: {e}")
 
     def _proprio_cb(self, tf_msg: TFMessage):
         try:
@@ -140,10 +134,8 @@ class OpenVLAOFTPublisher(Node):
                     t = t.transform  # get the actual Transform
                     eef_pos = np.array([t.translation.x, t.translation.y, t.translation.z], dtype=np.float32)
                     quat = np.array([t.rotation.x, t.rotation.y, t.rotation.z, t.rotation.w], dtype=np.float32)
-                    from experiments.robot.libero.libero_utils import quat2axisangle
-                    eef_axis_angle = quat2axisangle(quat)
                     gripper_state = np.array([0.0,0.0], dtype=np.float32)
-                    proprio = np.concatenate((eef_pos, eef_axis_angle, gripper_state), axis=-1)
+                    proprio = { "eef_pos": eef_pos, "eef_quat":quat, "gr_state": gripper_state} 
 
                     with self._lock:
                         self._latest_proprio = proprio
@@ -171,93 +163,54 @@ class OpenVLAOFTPublisher(Node):
 
         # Preprocess images: center / resize -> MODEL expects 224x224 (or configured)
         try:
-            full_in = cv2.resize(full, (self._img_size, self._img_size), interpolation=cv2.INTER_AREA)
-            wrist_in = cv2.resize(wrist, (self._img_size, self._img_size), interpolation=cv2.INTER_AREA)
+            observation, image = prepare_observation(image= full,
+                                                     wrist_image = wrist, 
+                                                     proprio = proprio,
+                                                     resize_size = self._img_size 
+                                                     )
         except Exception as e:
-            self.get_logger().error(f"Image resize error: {e}")
+            self.get_logger().error(f"Error while preparing the observation: {e}")
             return
+        # Save images for replay
+        self._replay_images.append(image)
 
-        # Proprio: if missing, fill with zeros of reasonable length (model expects some state length).
-        if proprio is None:
-            # Choose a fallback length. If model.cfg provides expected proprio size, try to use it.
-            fallback_len = getattr(self.model.cfg, "proprio_dim", None)
-            if fallback_len is None:
-                # conservative default (your example used 8)
-                fallback_len = 8
-            proprio = np.zeros((fallback_len,), dtype=np.float32)
-
-        # Build observation dict expected by your model wrapper
-        observation = {
-            "full_image": full_in,
-            "wrist_image": wrist_in,
-            "state": proprio,
-            "task_description": self._task_description,
-        }
 
         # Call model to get action chunk
         try:
-            actions = self.model.predict_actions(observation, self._task_description)
+            if len(self._action_queue) == 0:
+                self.get_logger().info("The action queue is empty querying the model")
+                actions = self.model.predict_actions(observation, self._task_description)
+                self._action_queue.extend(actions)
+
+            action = self._action_queue.popleft()
         except Exception as e:
             self.get_logger().error(f"Model prediction failed: {e}")
             return
 
         # actions can be torch tensor or numpy. Normalize to numpy.
-        if hasattr(actions, "detach"):
+        if hasattr(action, "detach"):
             try:
-                actions_np = actions.detach().cpu().numpy()
+                action_np = action.detach().cpu().numpy()
             except Exception:
-                actions_np = np.asarray(actions)
+                action_np = np.asarray(action)
         else:
-            actions_np = np.asarray(actions)
+            action_np = np.asarray(action)
 
-        # If returned shape is (batch, horizon, 7) or (horizon, 7)
-        # normalize to shape: (horizon, 7)
-        if actions_np.ndim == 3:
-            actions_np = actions_np[0]
-        if actions_np.ndim == 2 and actions_np.shape[-1] >= 7:
-            # OK: (horizon, >=7)
-            pass
-        elif actions_np.ndim == 1 and actions_np.shape[0] >= 7:
-            actions_np = actions_np[None, :]
-        else:
-            self.get_logger().error(f"Unexpected action shape returned by model: {actions_np.shape}")
+        # Returned shape is  (7,)
+        if action_np.shape != (7,):
+            self.get_logger().error(f"Unexpected action shape returned by model: {action_np.shape}")
             return
 
-        # Optional: ensemble across horizon/time using your ActionEnsembler
-        if self._ensembler is not None:
-            try:
-                # ActionEnsembler expects shape (horizon, 7) or similar; adapt if necessary.
-                ensembled = self._ensembler.ensemble_action(actions_np)
-                actions_np = np.asarray(ensembled)
-            except Exception as e:
-                self.get_logger().warning(f"ActionEnsembler failed, continuing with raw actions: {e}")
-
-        # Extract first action7:
-        # allowable shapes: (horizon, 7) or (1,7)
-        first7 = None
-        if actions_np.ndim == 2:
-            first7 = actions_np[0, :7]
-        elif actions_np.ndim == 1:
-            first7 = actions_np[:7]
-        else:
-            self.get_logger().error(f"Cannot extract first action from shape {actions_np.shape}")
-            return
-
-        # Convert to delta6 (dx,dy,dz, rot_axis*angle) and grip_rel
-        dx, dy, dz = map(float, first7[0:3])
-        droll, dpitch, dyaw = map(float, first7[3:6])
-        # Convert euler (r,p,y) to axis-angle-like representation roughly as euler2axangle does in your previous script.
-        # To avoid extra dependency, we'll convert small angles approximatively: rot_ax = [droll, dpitch, dyaw] * scale
-        # If you prefer exact conversion, swap in transforms3d.euler.euler2axangle as you had.
+        # Process before publish
+        dx, dy, dz = map(float, action[0:3])
+        droll, dpitch, dyaw = map(float, action[3:6])
         rot_ax = np.array([droll, dpitch, dyaw], dtype=np.float64)
 
-        # scale if user wants (you can add command-line params to scale)
         action_scale = 1.0
         delta6 = np.concatenate([np.array([dx, dy, dz], dtype=np.float64),
                                  rot_ax * action_scale], axis=-1)
 
-        # grip: model likely outputs open probability in last dim (0..1). Map to rel pulse or +/-1
-        open_abs = float(first7[6])
+        open_abs = float(action[6])
         # Simple mapping: open_abs < 0.5 -> close (1.0), else open (-1.0) — matches your prior script
         grip_rel = 1.0 if open_abs < 0.5 else -1.0
 
