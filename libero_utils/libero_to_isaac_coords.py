@@ -1,31 +1,37 @@
 import numpy as np
-from scipy.spatial.transform import Rotation as R
 
-def libero_to_isaac_pos(p):
-    x, y, z = p
-    return np.array([-y, x, z])
-
-def libero_to_isaac_rot(R_lib):
-    C = np.array([[0, 1, 0],
-                  [-1, 0, 0],
-                  [0, 0, 1]])
-    return C @ R_lib @ C.T
-
-# Input from LIBERO
-cam_pos_lib = np.array([1.0, 0.0, 1.48])
-R_lib = np.array([
-    [-0.0, -0.2582, 0.9661],
-    [ 1.0,  0.0,     0.0   ],
-    [ 0.0,  0.9661,  0.2582]
+# IsaacSim
+R_isaac = np.array([
+    [-0.9998478, 0.0164766, 0.0057347],
+    [-0.0140666, -0.9558074, 0.2936569],
+    [0.0103197, 0.2935315, 0.9558937]
 ])
+t_isaac = np.array([0.83196, -0.00336, 0.52816])
 
-# Convert
-pos_isaac = libero_to_isaac_pos(cam_pos_lib)
-R_isaac = libero_to_isaac_rot(R_lib)
+T_isaac = np.eye(4)
+T_isaac[:3,:3] = R_isaac
+T_isaac[:3,3] = t_isaac
 
-# Quaternion (xyzw)
-q_isaac = R.from_matrix(R_isaac).as_quat()
+# Libero
+R_libero = np.array([
+    [0, -0.2582, 0.9661],
+    [1, 0, 0],
+    [0, 0.9661, 0.2582]
+])
+t_libero = np.array([1.66, 0, 0.568])
 
-print("IsaacSim Position:", pos_isaac)
-print("IsaacSim Quaternion (xyzw):", q_isaac)
+T_libero = np.eye(4)
+T_libero[:3,:3] = R_libero
+T_libero[:3,3] = t_libero
 
+# Transform Isaac -> Libero
+T_isaac_to_libero = T_libero @ np.linalg.inv(T_isaac)
+
+T_libero_to_isaac = np.linalg.inv(T_isaac_to_libero)
+
+if __name__=="__main__":
+    print("Isaac to Libero transformation")
+    print(T_isaac_to_libero)
+
+    print("Libero to Isaac transformation")
+    print(T_libero_to_isaac)

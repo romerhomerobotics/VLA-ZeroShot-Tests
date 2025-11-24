@@ -55,8 +55,14 @@ from experiments.robot.libero.run_libero_eval import (
     process_action,
 )
 
-from libero_utils import prepare_observation
-from ros_utils import ROSInterface
+from libero_utils.libero_utils import (
+    prepare_observation,
+)
+from ros_utils.ros_utils import ROSInterface
+from scipy.spatial.transform import Rotation as Rot
+from compare_eef_poses import R as R_umeyama, t as t_umeyama
+import torch
+import torch.nn as nn
 
 
 class TaskSuite(str, Enum):
@@ -128,6 +134,84 @@ class GenerateConfig:
 
     seed: int = 7                                    # Random Seed (for reproducibility)
 
+import numpy as np
+
+W_FIRST = False
+
+def quat_to_rotmat(q):
+    if W_FIRST:
+        w, x, y, z = q
+    else:
+        x, y, z, w = q
+    # Normalize
+    n = np.linalg.norm([x, y, z, w])
+    x, y, z, w = x/n, y/n, z/n, w/n
+
+    R = np.array([
+        [1 - 2*(y*y + z*z), 2*(x*y - z*w), 2*(x*z + y*w)],
+        [2*(x*y + z*w), 1 - 2*(x*x + z*z), 2*(y*z - x*w)],
+        [2*(x*z - y*w), 2*(y*z + x*w), 1 - 2*(x*x + y*y)]
+    ], dtype=np.float32)
+    return R
+
+def rotmat_to_quat(R):
+    R = np.asarray(R, dtype=np.float64)
+    trace = np.trace(R)
+
+    if trace > 0:
+        s = 0.5 / np.sqrt(trace + 1.0)
+        w = 0.25 / s
+        x = (R[2,1] - R[1,2]) * s
+        y = (R[0,2] - R[2,0]) * s
+        z = (R[1,0] - R[0,1]) * s
+    else:
+        if R[0,0] > R[1,1] and R[0,0] > R[2,2]:
+            s = 2.0 * np.sqrt(1.0 + R[0,0] - R[1,1] - R[2,2])
+            w = (R[2,1] - R[1,2]) / s
+            x = 0.25 * s
+            y = (R[0,1] + R[1,0]) / s
+            z = (R[0,2] + R[2,0]) / s
+        elif R[1,1] > R[2,2]:
+            s = 2.0 * np.sqrt(1.0 + R[1,1] - R[0,0] - R[2,2])
+            w = (R[0,2] - R[2,0]) / s
+            x = (R[0,1] + R[1,0]) / s
+            y = 0.25 * s
+            z = (R[1,2] + R[2,1]) / s
+        else:
+            s = 2.0 * np.sqrt(1.0 + R[2,2] - R[0,0] - R[1,1])
+            w = (R[1,0] - R[0,1]) / s
+            x = (R[0,2] + R[2,0]) / s
+            y = (R[1,2] + R[2,1]) / s
+            z = 0.25 * s
+
+    if W_FIRST:
+        q = np.array([w, x, y, z], dtype=np.float32)
+    else:
+        q = np.array([x, y, z, w], dtype=np.float32)
+
+    return q / np.linalg.norm(q)
+# Define the same MLP structure as during training
+class PoseMLP(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(7, 64),
+            nn.ReLU(),
+            nn.Linear(64, 64),
+            nn.ReLU(),
+            nn.Linear(64, 7)
+        )
+
+    def forward(self, x):
+        out = self.net(x)
+        pos = out[:, :3]
+        quat = out[:, 3:]
+        quat = quat / torch.norm(quat, dim=1, keepdim=True)
+        return torch.cat([pos, quat], dim=1)
+
+mlp = PoseMLP()
+mlp.load_state_dict(torch.load("publishers/pose_mlp.pt"))
+mlp.eval()
 
 def run_episode(
     cfg : GenerateConfig,
@@ -157,29 +241,42 @@ def run_episode(
 
     # Run episode
     success = False
+    flush_queue = True
     try:
-        while t < max_steps + cfg.num_steps_wait:
+        while t < max_steps * 1000 + cfg.num_steps_wait:
             rclpy.spin_once(ros, timeout_sec = 0.01)
 
-            
-            full_image, wrist_image, proprio = ros.get_latest()
+            full_image, wrist_image, raw_proprio = ros.get_latest()
 
-            if full_image is None or wrist_image is None or proprio is None:
+            # Check data availability (raw_proprio must be checked)
+            if full_image is None or wrist_image is None or raw_proprio is None:
+                # don't spam logs every loop; only on first few missing frames
                 print("Waiting for sensor data...")
-                t += 1
                 continue
 
-            # Do nothing for the first few timesteps to let objects stabilize
-            # if t < cfg.num_steps_wait:
-                # t += 1
-                # Do not publish any action
-                # continue
+            # --- Transform proprio from IsaacSim -> LIBERO using trained MLP ---
+            pos_isaac = np.asarray(raw_proprio["eef_pos"], dtype=np.float32)
+            q_isaac = np.asarray(raw_proprio["eef_quat"], dtype=np.float32)  # [x,y,z,w]
 
-            # Prepare observation to input to the model
+            # Prepare input for MLP
+            x_input = torch.from_numpy(np.concatenate([pos_isaac, q_isaac])).float().unsqueeze(0)  # shape [1,7]
+
+            with torch.no_grad():
+                y_output = mlp(x_input).numpy().squeeze(0)
+
+            pos_libero = y_output[:3]
+            q_libero   = y_output[3:]
+
+            proprio = {
+                "eef_pos": pos_libero.astype(np.float32),
+                "eef_quat": q_libero.astype(np.float32),
+                "gr_state": np.asarray(raw_proprio.get("gr_state", np.array([0.0, 0.0])), dtype=np.float32),
+            }
+
+            # Prepare observation to input to the model (normalize based on LIBERO stats)
             observation, image = prepare_observation(
-                                    image = full_image, wrist_image = wrist_image, 
-                                    proprio = proprio, resize_size = resize_size
-                                )
+                image=full_image, wrist_image=wrist_image, proprio=proprio, resize_size=resize_size
+            )
 
             replay_images.append(image)
 
@@ -198,6 +295,23 @@ def run_episode(
                     use_film=cfg.use_film,
                 )
                 action_queue.extend(actions)
+
+                if flush_queue:
+                    actions = get_action(
+                    cfg,
+                    model,
+                    observation,
+                    task_description,
+                    processor=processor,
+                    action_head=action_head,
+                    proprio_projector=proprio_projector,
+                    noisy_action_projector=noisy_action_projector,
+                    use_film=cfg.use_film,
+                    )
+                    flush_queue = False
+                    
+                action_queue.clear()
+                action_queue.extend(actions)
             
             # Get action from queue
             action = action_queue.popleft()
@@ -207,8 +321,8 @@ def run_episode(
 
             # Clip actions
             norm = np.linalg.norm(action)
-            if norm > 0.1:
-                action = action * (0.1 / norm)
+            if norm > 0.2:
+                action = action * (0.2 / norm)
             
             # Publish action to ROS
             ros.publish_action(action)
