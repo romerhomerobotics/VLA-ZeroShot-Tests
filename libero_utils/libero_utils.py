@@ -19,11 +19,11 @@ def prepare_observation(image: np.ndarray,
     """Prepare observation taken from IsaacSim in the same way as Libero"""
 
     image_resized = resize_image_for_policy(image, resize_size)
-    wrist_image_resized= resize_image_for_policy(wrist_image, resize_size)
+    #wrist_image_resized= resize_image_for_policy(wrist_image, resize_size)
 
     observation = {
         "full_image" : image_resized,
-        "wrist_image" : wrist_image_resized,
+        #"wrist_image" : wrist_image_resized, # commented for the fine-tuned setup
         "state" : np.concatenate(
             (proprio["eef_pos"], quat2axisangle(proprio["eef_quat"]), proprio["gr_state"]) 
         )

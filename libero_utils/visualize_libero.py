@@ -4,10 +4,23 @@ import matplotlib.pyplot as plt
 import imageio.v3 as iio # Add this line for video writing
 
 # --- File Paths and Data Loading (Existing Code) ---
-hdf5_file = "/home/romer-vla-sim/Workspace/rlds_data/libero_rlds/libero_object_no_noops/pick_up_the_ketchup_and_place_it_in_the_basket_demo.hdf5"
+hdf5_file = "/home/romer-vla-sim/Workspace/rlds_data/libero_rlds/libero_object_no_noops/pick_up_the_chocolate_pudding_and_place_it_in_the_basket_demo.hdf5"
 
 h5 = h5py.File(hdf5_file, "r")
-demo1 = h5["data"]["demo_1"]
+demo1 = h5["data"]["demo_9"]
+steps = 0
+count = 0
+for i in range(50):
+    try:
+        demo_i = "demo_" + str(i)
+        demo = h5["data"][demo_i]
+        count +=1
+        ee_states = np.asarray(demo["obs"]["ee_states"])
+        steps += ee_states.shape[0]
+    except Exception:
+        pass
+print(steps / count)
+
 
 # Load datasets
 images = np.asarray(demo1["obs"]["agentview_rgb"])[:,::-1,::-1]
@@ -15,6 +28,7 @@ actions = np.asarray(demo1["actions"])
 ee_pos = np.asarray(demo1["obs"]["ee_pos"])
 ee_ori = np.asarray(demo1["obs"]["ee_ori"])
 ee_states = np.asarray(demo1["obs"]["ee_states"])
+steps = np.asarray(demo["obs"]["ee_states"]).shape[0]
 
 print("EE Position mean:", ee_pos.mean(axis=0), "std:", ee_pos.std(axis=0))
 print("EE Orientation mean:", ee_ori.mean(axis=0), "std:", ee_ori.std(axis=0))

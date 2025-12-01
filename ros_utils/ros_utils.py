@@ -22,10 +22,10 @@ class ROSInterface(Node):
 
         # Subscribers
         self.sub_full = self.create_subscription(
-            Image, "/tripod_2/rgb", self._full_cam_cb, 10
+            Image, "/tripod_2/color/image_raw", self._full_cam_cb, 10 # "/tripod_2/rgb" for libero setup 
         )
         self.sub_wrist = self.create_subscription(
-            Image, "/wrist/color/image_raw", self._wrist_cam_cb, 10
+            Image, "/wrist/rgb", self._wrist_cam_cb, 10 # /wrist/color/image_raw for libero setup
         )
         self.sub_tf = self.create_subscription(
             TFMessage, "/tf", self._proprio_cb, 10
