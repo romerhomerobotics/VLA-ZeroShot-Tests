@@ -21,6 +21,20 @@ import traceback
 
 W_FIRST = False
 
+def normalize_gripper(gripper):
+    if gripper > 0:
+        gripper = 1
+    else:
+        gripper = 0
+    return np.array([-gripper, gripper])
+def unnormalize_gripper(gripper):
+    if gripper > 0:
+        gripper = 0.04
+    else:
+        gripper = 0
+    return gripper
+
+
 def run_episode(
     cfg,
     model,
@@ -36,7 +50,7 @@ def run_episode(
     t = 0
     replay_images = []
 #    max_steps = cfg.TASK_MAX_STEPS
-    max_steps = 5_000
+    max_steps = 1_000
     success = False
     flush = True
 
@@ -54,6 +68,8 @@ def run_episode(
             pos = np.asarray(raw_proprio["eef_pos"], dtype=np.float32)
             quat = np.asarray(raw_proprio["eef_quat"], dtype=np.float32)
             gripper = np.asarray(raw_proprio.get("gr_state", [-gripper, gripper]), dtype=np.float32)
+
+            gripper = normalize_gripper(gripper[-1])
 
             proprio = {
                 "eef_pos": pos,
@@ -81,6 +97,7 @@ def run_episode(
             # Pop action from queue
             action = action_queue.popleft()
             action_gripper = action[-1]
+            action_gripper = unnormalize_gripper(action_gripper)
             # Clip actions
             # norm = np.linalg.norm(action)
             # if norm > 0.2:
