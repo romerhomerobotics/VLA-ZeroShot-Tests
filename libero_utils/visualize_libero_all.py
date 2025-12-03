@@ -1,71 +1,89 @@
 import h5py
 import numpy as np
+import os
 
-hdf5_file = "/home/romer-vla-sim/Workspace/rlds_data/libero_rlds/libero_object_no_noops/pick_up_the_chocolate_pudding_and_place_it_in_the_basket_demo.hdf5"
+data_dir = "/home/romer-vla-sim/Workspace/rlds_data/libero_rlds/libero_object_no_noops"
 
-with h5py.File(hdf5_file, "r") as h5:
-    ee_pos_list = []
-    ee_ori_list = []
-    actions_list = []
-    steps_list = []   # per-demo step counts
-    found_demos = []
+# Collect aggregate stats across all HDF5s
+ee_pos_mean_abs_all, ee_pos_std_abs_all = [], []
+ee_ori_mean_abs_all, ee_ori_std_abs_all = [], []
+actions_mean_abs_all, actions_std_abs_all = [], []
+demos_per_file = []
 
-    for i in range(50):
-        demo_i = f"demo_{i}"
-        try:
-            demo = h5["data"][demo_i]
-            ee_pos = np.asarray(demo["obs"]["ee_pos"])
-            ee_ori = np.asarray(demo["obs"]["ee_ori"])
-            actions = np.asarray(demo["actions"])
+# Iterate over all .hdf5 files
+for fname in sorted(os.listdir(data_dir)):
+    if not fname.endswith(".hdf5"):
+        continue
+    fpath = os.path.join(data_dir, fname)
+    print(f"Processing {fname} ...")
 
-            n_steps = ee_pos.shape[0]
-            steps_list.append(n_steps)
+    try:
+        with h5py.File(fpath, "r") as h5:
+            ee_pos_mean_abs, ee_pos_std_abs = [], []
+            ee_ori_mean_abs, ee_ori_std_abs = [], []
+            actions_mean_abs, actions_std_abs = [], []
+            found_demos = []
 
-            ee_pos_list.append(ee_pos)
-            ee_ori_list.append(ee_ori)
-            actions_list.append(actions)
-            found_demos.append(demo_i)
+            for i in range(50):
+                demo_i = f"demo_{i}"
+                if demo_i not in h5["data"]:
+                    continue
+                demo = h5["data"][demo_i]
+                ee_pos = np.asarray(demo["obs"]["ee_pos"])
+                ee_ori = np.asarray(demo["obs"]["ee_ori"])
+                actions = np.asarray(demo["actions"])
 
-            # print(f"Loaded {demo_i}: {n_steps} steps")
+                ee_pos_mean_abs.append(np.abs(ee_pos.mean(axis=0)))
+                ee_pos_std_abs.append(np.abs(ee_pos.std(axis=0)))
 
-        except KeyError:
-            # demo not present, skip
-            # print(f"Skipping {demo_i} (not found)")
-            continue
+                ee_ori_mean_abs.append(np.abs(ee_ori.mean(axis=0)))
+                ee_ori_std_abs.append(np.abs(ee_ori.std(axis=0)))
 
-    if len(found_demos) == 0:
-        print("No demos found in the file.")
-    else:
-        # Concatenate all available demos (concatenate along timestep axis)
-        ee_pos_all = np.concatenate(ee_pos_list, axis=0)
-        ee_ori_all = np.concatenate(ee_ori_list, axis=0)
-        actions_all = np.concatenate(actions_list, axis=0)
+                actions_mean_abs.append(np.abs(actions.mean(axis=0)))
+                actions_std_abs.append(np.abs(actions.std(axis=0)))
 
-        # Aggregated stats over all timesteps (correct population std)
-        print("\n=== Aggregated statistics over ALL timesteps (all demos combined) ===")
-        print("Total demos found:", len(found_demos))
-        print("Total timesteps:", ee_pos_all.shape[0])
+                found_demos.append(demo_i)
 
-        print("\nEE Position mean:", ee_pos_all.mean(axis=0))
-        print("EE Position std:", ee_pos_all.std(axis=0))
+            n_demos = len(found_demos)
+            if n_demos == 0:
+                print(f"  No demos found in {fname}")
+                continue
 
-        print("\nEE Orientation mean:", ee_ori_all.mean(axis=0))
-        print("EE Orientation std:", ee_ori_all.std(axis=0))
+            demos_per_file.append(n_demos)
 
-        print("\nActions mean:", actions_all.mean(axis=0))
-        print("Actions std:", actions_all.std(axis=0))
+            # Per-file mean over demos
+            ee_pos_mean_abs_all.append(np.mean(ee_pos_mean_abs, axis=0) * n_demos)
+            ee_pos_std_abs_all.append(np.mean(ee_pos_std_abs, axis=0) * n_demos)
+            ee_ori_mean_abs_all.append(np.mean(ee_ori_mean_abs, axis=0) * n_demos)
+            ee_ori_std_abs_all.append(np.mean(ee_ori_std_abs, axis=0) * n_demos)
+            actions_mean_abs_all.append(np.mean(actions_mean_abs, axis=0) * n_demos)
+            actions_std_abs_all.append(np.mean(actions_std_abs, axis=0) * n_demos)
 
-        # # Per-demo step statistics
-        # steps_arr = np.asarray(steps_list, dtype=int)
-        # print("\n=== Per-demo step statistics ===")
-        # for demo_name, n in zip(found_demos, steps_list):
-        #     print(f"{demo_name}: {n} steps")
+            print(f"  {n_demos} demos processed.")
 
-        # print("\nSummary of demo lengths (timesteps):")
-        # print("Total steps across demos:", steps_arr.sum())
-        # print("Number of demos (present):", steps_arr.size)
-        # print("Mean steps per demo:", steps_arr.mean())
-        # print("Std of steps per demo:", steps_arr.std())   # population std
-        # print("Min steps in a demo:", steps_arr.min())
-        # print("Max steps in a demo:", steps_arr.max())
+    except Exception as e:
+        print(f"  Error reading {fname}: {e}")
 
+# Combine stats across files weighted by number of demos
+total_demos = sum(demos_per_file)
+if total_demos > 0:
+    print("\n=== Weighted averaged absolute mean/std across ALL tasks ===")
+    print(f"Total demos processed: {total_demos}")
+
+    ee_pos_mean_abs_final = sum(ee_pos_mean_abs_all) / total_demos
+    ee_pos_std_abs_final  = sum(ee_pos_std_abs_all) / total_demos
+    ee_ori_mean_abs_final = sum(ee_ori_mean_abs_all) / total_demos
+    ee_ori_std_abs_final  = sum(ee_ori_std_abs_all) / total_demos
+    actions_mean_abs_final = sum(actions_mean_abs_all) / total_demos
+    actions_std_abs_final  = sum(actions_std_abs_all) / total_demos
+
+    print("\nEE Position |mean|:", ee_pos_mean_abs_final)
+    print("EE Position |std|:", ee_pos_std_abs_final)
+
+    print("\nEE Orientation |mean|:", ee_ori_mean_abs_final)
+    print("EE Orientation |std|:", ee_ori_std_abs_final)
+
+    print("\nActions |mean|:", actions_mean_abs_final)
+    print("Actions |std|:", actions_std_abs_final)
+else:
+    print("No valid HDF5 demos found.")

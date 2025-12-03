@@ -7,3 +7,5 @@ __pycache__/
 rollouts/
 
 .vscode/
+
+*.mp4

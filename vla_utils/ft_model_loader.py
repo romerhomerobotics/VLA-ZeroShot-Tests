@@ -93,7 +93,7 @@ class OpenVLAOFTModel:
         self.processor = get_processor(self.cfg,)
 
         # Step 4: Load trained action head
-        ah_path = os.path.join(ckpt_dir, "action_head--150000_checkpoint.pt")
+        ah_path = os.path.join(ckpt_dir, "action_head--5000_checkpoint.pt")
         if not os.path.isfile(ah_path):
             raise FileNotFoundError(f"Missing action head checkpoint: {ah_path}")
 
@@ -104,7 +104,7 @@ class OpenVLAOFTModel:
         self.action_head.eval()
 
         # Step 5: Load proprio projector
-        pp_path = os.path.join(ckpt_dir, "proprio_projector--150000_checkpoint.pt")
+        pp_path = os.path.join(ckpt_dir, "proprio_projector--5000_checkpoint.pt")
         if not os.path.isfile(pp_path):
             raise FileNotFoundError(f"Missing proprio projector: {pp_path}")
 

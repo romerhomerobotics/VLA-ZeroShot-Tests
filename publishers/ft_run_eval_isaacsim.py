@@ -36,23 +36,24 @@ def run_episode(
     t = 0
     replay_images = []
 #    max_steps = cfg.TASK_MAX_STEPS
-    max_steps = 1_000
+    max_steps = 5_000
     success = False
+    flush = True
 
     try:
         while t < max_steps:
             rclpy.spin_once(ros, timeout_sec=0.01)
 
             # Get latest sensor data
-            full_image, wrist_image, raw_proprio = ros.get_latest()
-            if full_image is None or raw_proprio is None:
+            full_image, wrist_image, raw_proprio, gripper = ros.get_latest()
+            if full_image is None or raw_proprio is None or gripper is None:
                 print("Waiting for data")
                 continue  # wait for valid data
 
             # Transform proprio from IsaacSim -> LIBERO
             pos = np.asarray(raw_proprio["eef_pos"], dtype=np.float32)
             quat = np.asarray(raw_proprio["eef_quat"], dtype=np.float32)
-            gripper = np.asarray(raw_proprio.get("gr_state", [0.0, 0.0]), dtype=np.float32)
+            gripper = np.asarray(raw_proprio.get("gr_state", [-gripper, gripper]), dtype=np.float32)
 
             proprio = {
                 "eef_pos": pos,
@@ -72,18 +73,21 @@ def run_episode(
             # Query model if action queue empty
             if len(action_queue) == 0:
                 actions = model.predict_actions(observation, task_description)
+                if flush:
+                   flush = False
+                   continue 
                 action_queue.extend(actions)
 
             # Pop action from queue
             action = action_queue.popleft()
-
+            action_gripper = action[-1]
             # Clip actions
             # norm = np.linalg.norm(action)
             # if norm > 0.2:
                 # action = action * (0.2 / norm)
 
             # Publish to ROS
-            ros.publish_action(action)
+            ros.publish_action(action, action_gripper)
 
             t += 1
 

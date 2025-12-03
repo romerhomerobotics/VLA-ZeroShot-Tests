@@ -5,6 +5,7 @@ from sensor_msgs.msg import Image
 from tf2_msgs.msg import TFMessage
 from cv_bridge import CvBridge
 from std_msgs.msg import Float64MultiArray
+from std_msgs.msg import Float64
 
 import cv2
 import numpy as np
@@ -37,6 +38,37 @@ class ROSInterface(Node):
             "/cartesian_delta_command",
             10
         )
+
+        # Gripper state storage
+        self._latest_gripper = None
+
+        # Gripper subscriber
+        self.sub_gripper = self.create_subscription(
+            Float64,
+            "/gripper_state",
+            self._gripper_cb,
+            10
+        )
+
+        # Gripper command publisher
+        self.pub_gripper = self.create_publisher(
+            Float64,
+            "/gripper_command",
+            10
+        )
+
+    def _gripper_cb(self, msg: Float64):
+        with self._lock:
+            self._latest_gripper = float(msg.data)
+
+    def get_latest_gripper(self):
+        with self._lock:
+            return self._latest_gripper
+
+    def publish_gripper(self, gripper_cmd):
+        msg = Float64()
+        msg.data = gripper_cmd
+        self.pub_gripper.publish(msg)
 
     # ------------------------------ CALLBACKS ------------------------------
 
@@ -81,10 +113,18 @@ class ROSInterface(Node):
                 self._latest_full_rgb,
                 self._latest_wrist_rgb,
                 self._latest_proprio,
+                self._latest_gripper
             )
 
-    def publish_action(self, action7):
+    def publish_action(self, action7, gripper):
+        # Publish Cartesian delta / joint vel
         msg = Float64MultiArray()
         msg.data = action7.tolist()
         self.pub_action.publish(msg)
+
+        # Publish single-float gripper command
+        gmsg = Float64()
+        gmsg.data = float(gripper)
+        self.pub_gripper.publish(gmsg)
+
 

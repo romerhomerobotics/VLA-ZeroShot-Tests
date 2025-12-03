@@ -1,91 +1,78 @@
 import h5py
 import numpy as np
 import matplotlib.pyplot as plt
-import imageio.v3 as iio # Add this line for video writing
+import imageio.v3 as iio
+import os
+import random
 
-# --- File Paths and Data Loading (Existing Code) ---
-hdf5_file = "/home/romer-vla-sim/Workspace/rlds_data/libero_rlds/libero_object_no_noops/pick_up_the_chocolate_pudding_and_place_it_in_the_basket_demo.hdf5"
+# --- Parameters ---
+data_dir = "/home/romer-vla-sim/Workspace/rlds_data/libero_rlds/libero_object_no_noops"
+OUTPUT_DIR = "./demo_videos"
+os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-h5 = h5py.File(hdf5_file, "r")
-demo1 = h5["data"]["demo_9"]
-steps = 0
-count = 0
-for i in range(50):
-    try:
-        demo_i = "demo_" + str(i)
-        demo = h5["data"][demo_i]
-        count +=1
-        ee_states = np.asarray(demo["obs"]["ee_states"])
-        steps += ee_states.shape[0]
-    except Exception:
-        pass
-print(steps / count)
+FPS = 20  # frames per second
+NUM_DEMOS_PER_TASK = 3
+NUM_TASKS = 3  # first 3 HDF5 files (can adjust)
 
+# --- Get HDF5 files ---
+hdf5_files = sorted([f for f in os.listdir(data_dir) if f.endswith(".hdf5")])
+hdf5_files = hdf5_files[:NUM_TASKS]  # limit to 3 tasks
 
-# Load datasets
-images = np.asarray(demo1["obs"]["agentview_rgb"])[:,::-1,::-1]
-actions = np.asarray(demo1["actions"])
-ee_pos = np.asarray(demo1["obs"]["ee_pos"])
-ee_ori = np.asarray(demo1["obs"]["ee_ori"])
-ee_states = np.asarray(demo1["obs"]["ee_states"])
-steps = np.asarray(demo["obs"]["ee_states"]).shape[0]
+# --- Function to generate video for a single demo ---
+def generate_video(images, ee_pos, ee_ori, actions, output_file, fps=20):
+    plt.ioff()
+    fig, ax = plt.subplots(figsize=(4, 4))
+    video_frames = []
 
-print("EE Position mean:", ee_pos.mean(axis=0), "std:", ee_pos.std(axis=0))
-print("EE Orientation mean:", ee_ori.mean(axis=0), "std:", ee_ori.std(axis=0))
-print("Actions mean:", actions.mean(axis=0), "std:", actions.std(axis=0))
+    for i in range(images.shape[0]):
+        ax.clear()
+        img = images[i]
+        ax.imshow(img)
 
-# --- Video Setup ---
-# Define the output file name and frames per second (FPS)
-OUTPUT_VIDEO_FILE = "demo_visualization.mp4"
-FPS = 20 # You can adjust this value
+        # Overlay EE pos, ori, and actions
+        x, y, z = ee_pos[i]
+        ori = ee_ori[i]
+        act = actions[i]
+        text = (
+            f"Pos: [{x:.2f}, {y:.2f}, {z:.2f}]\n"
+            f"Ori: [{ori[0]:.2f}, {ori[1]:.2f}, {ori[2]:.2f}]\n"
+            f"Action: [{', '.join(f'{a:.2f}' for a in act)}]"
+        )
+        ax.text(5, 20, text, color="yellow", fontsize=10, backgroundcolor="black")
+        ax.set_title(f"Frame {i}")
+        ax.axis("off")
 
-# Visualization
-plt.ioff() # Use ioff for video generation
-fig, ax = plt.subplots(figsize=(4, 4)) # Adjust figure size for 256x256 image aspect
-num_frames = images.shape[0]
+        fig.canvas.draw()
+        frame_array = np.array(fig.canvas.renderer.buffer_rgba())
+        video_frames.append(frame_array[..., :3])
 
-# --- Collecting Frames for Video ---
-# Create a list to store the rendered frames as numpy arrays
-video_frames = []
+    plt.close(fig)
+    iio.imwrite(output_file, video_frames, fps=fps, quality=8, codec='libx264')
+    print(f"Saved video: {output_file}")
 
-for i in range(num_frames):
-    ax.clear()
-    img = images[i]
+# --- Main loop: iterate over tasks and demos ---
+for task_idx, fname in enumerate(hdf5_files):
+    fpath = os.path.join(data_dir, fname)
+    print(f"\nProcessing task {task_idx+1}: {fname}")
 
-    # Overlay EE position
-    x, y, z = ee_pos[i]
-    ax.imshow(img)
+    with h5py.File(fpath, "r") as h5:
+        available_demos = [k for k in h5["data"].keys()]
+        if len(available_demos) < NUM_DEMOS_PER_TASK:
+            print(f"  Warning: only {len(available_demos)} demos available. Adjusting selection.")
+            selected_demos = available_demos
+        else:
+            selected_demos = random.sample(available_demos, NUM_DEMOS_PER_TASK)
 
-    # Overlay EE pos and ori as text
-    ori = ee_ori[i]
-    act = actions[i]
-    text = (
-        f"Pos: [{x:.2f}, {y:.2f}, {z:.2f}]\n"
-        f"Ori: [{ori[0]:.2f}, {ori[1]:.2f}, {ori[2]:.2f}]\n"
-        f"Action: [{', '.join(f'{a:.2f}' for a in act)}]"
-    )
-    ax.text(5, 20, text, color="yellow", fontsize=10, backgroundcolor="black")
+        for demo_idx, demo_key in enumerate(selected_demos):
+            demo = h5["data"][demo_key]
+            images = np.asarray(demo["obs"]["agentview_rgb"])[:, ::-1, ::-1]
+            actions = np.asarray(demo["actions"])
+            ee_pos = np.asarray(demo["obs"]["ee_pos"])
+            ee_ori = np.asarray(demo["obs"]["ee_ori"])
 
-    ax.set_title(f"Frame {i}")
-    ax.axis("off")
-    
-    # --- Save the current figure to a numpy array ---
-    fig.canvas.draw()
-    # Convert the figure to an array and append to the list
-    frame_array = np.array(fig.canvas.renderer.buffer_rgba())
-    # Keep only the RGB channels (drop the alpha channel)
-    video_frames.append(frame_array[..., :3]) 
-    
-# Close the plot figure after the loop finishes
-plt.close(fig)
+            output_file = os.path.join(
+                OUTPUT_DIR, f"task{task_idx+1}_{demo_key}.mp4"
+            )
+            generate_video(images, ee_pos, ee_ori, actions, output_file, fps=FPS)
 
-# --- Save the Video File ---
-print(f"Saving video to {OUTPUT_VIDEO_FILE}...")
-iio.imwrite(
-    OUTPUT_VIDEO_FILE, 
-    video_frames, 
-    fps=FPS, 
-    quality=8, # 0 (lowest) to 10 (highest) quality. 
-    codec='libx264' # Common codec for MP4
-)
-print("Video saved successfully.")
+print("\nAll videos generated successfully.")
