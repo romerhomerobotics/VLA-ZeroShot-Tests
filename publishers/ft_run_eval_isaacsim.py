@@ -22,18 +22,32 @@ import traceback
 W_FIRST = False
 
 def normalize_gripper(gripper):
-    if gripper > 0:
-        gripper = 1
-    else:
-        gripper = 0
-    return np.array([-gripper, gripper])
-def unnormalize_gripper(gripper):
-    if gripper > 0:
-        gripper = 0.04
-    else:
-        gripper = 0
-    return gripper
+    """
+    Model output: [-1, +1]
+    Sim expected: 0 (close) to 100 (open)
+    """
+    # Clamp input
+    gripper = np.clip(gripper, -1.0, 1.0)
 
+    # Map [-1, 1] to [0, 100]
+    sim_value = (gripper + 1) * 50.0   # -1->0, 1->100
+
+    sim_value = 0 if gripper > 90 else 100 
+
+    return float(sim_value)
+
+def unnormalize_gripper(g_state):
+    """
+    Sim reports: 0 (closed) to 0.04 (open)
+    Convert back to [-1, +1]
+    """
+    # Clamp incoming state
+    g_state = np.clip(g_state, 0.0, 0.04)
+
+    # Map [0, 0.04] to [-1, 1]
+    model_value = (g_state / 0.04) * 2.0 - 1.0
+
+    return float(model_value)
 
 def run_episode(
     cfg,
@@ -67,14 +81,14 @@ def run_episode(
             # Transform proprio from IsaacSim -> LIBERO
             pos = np.asarray(raw_proprio["eef_pos"], dtype=np.float32)
             quat = np.asarray(raw_proprio["eef_quat"], dtype=np.float32)
-            gripper = np.asarray(raw_proprio.get("gr_state", [-gripper, gripper]), dtype=np.float32)
+            gripper = float(gripper)
 
-            gripper = normalize_gripper(gripper[-1])
+            gripper = unnormalize_gripper(gripper)
 
             proprio = {
                 "eef_pos": pos,
                 "eef_quat": quat,
-                "gr_state": gripper
+                "gr_state": np.array([0, gripper])
             }
 
             # Prepare observation
@@ -97,7 +111,7 @@ def run_episode(
             # Pop action from queue
             action = action_queue.popleft()
             action_gripper = action[-1]
-            action_gripper = unnormalize_gripper(action_gripper)
+            action_gripper = normalize_gripper(action_gripper)
             # Clip actions
             # norm = np.linalg.norm(action)
             # if norm > 0.2:
