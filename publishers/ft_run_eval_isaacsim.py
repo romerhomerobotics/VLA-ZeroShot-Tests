@@ -32,8 +32,6 @@ def normalize_gripper(gripper):
     # Map [-1, 1] to [0, 100]
     sim_value = (gripper + 1) * 50.0   # -1->0, 1->100
 
-    sim_value = 0 if gripper > 90 else 100 
-
     return float(sim_value)
 
 def unnormalize_gripper(g_state):

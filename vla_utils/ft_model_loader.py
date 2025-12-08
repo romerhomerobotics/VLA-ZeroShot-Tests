@@ -6,6 +6,7 @@ OpenVLA-OFT model loader supporting:
 
 import logging
 import os
+import glob
 import torch
 from peft import PeftModel
 
@@ -93,9 +94,16 @@ class OpenVLAOFTModel:
         self.processor = get_processor(self.cfg,)
 
         # Step 4: Load trained action head
-        ah_path = os.path.join(ckpt_dir, "action_head--5000_checkpoint.pt")
-        if not os.path.isfile(ah_path):
-            raise FileNotFoundError(f"Missing action head checkpoint: {ah_path}")
+        # Use glob to find the action head checkpoint file dynamically
+        ah_pattern = os.path.join(ckpt_dir, "action_head--*_checkpoint.pt")
+        ah_paths = glob.glob(ah_pattern)
+
+        if not ah_paths:
+            raise FileNotFoundError(f"Missing action head checkpoint matching pattern: {ah_pattern}")
+        
+        # Assume the first match is the desired file (or you can sort/select the latest)
+        ah_path = ah_paths[0] 
+        logger.info(f"[OpenVLA-OFT] Using Action Head checkpoint: {os.path.basename(ah_path)}")
 
         self.action_head = get_action_head(self.cfg, llm_dim=self.vla.llm_dim)
         raw_sd = torch.load(ah_path, map_location="cpu")
@@ -104,9 +112,16 @@ class OpenVLAOFTModel:
         self.action_head.eval()
 
         # Step 5: Load proprio projector
-        pp_path = os.path.join(ckpt_dir, "proprio_projector--5000_checkpoint.pt")
-        if not os.path.isfile(pp_path):
-            raise FileNotFoundError(f"Missing proprio projector: {pp_path}")
+        # Use glob to find the proprio projector checkpoint file dynamically
+        pp_pattern = os.path.join(ckpt_dir, "proprio_projector--*_checkpoint.pt")
+        pp_paths = glob.glob(pp_pattern)
+
+        if not pp_paths:
+            raise FileNotFoundError(f"Missing proprio projector matching pattern: {pp_pattern}")
+
+        # Assume the first match is the desired file
+        pp_path = pp_paths[0]
+        logger.info(f"[OpenVLA-OFT] Using Proprio Projector checkpoint: {os.path.basename(pp_path)}")
 
         self.proprio_projector = get_proprio_projector(
             self.cfg, llm_dim=self.vla.llm_dim, proprio_dim=PROPRIO_DIM

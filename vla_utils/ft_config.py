@@ -18,6 +18,6 @@ def get_config() -> GenerateConfigFineTuned:
     Construct and return a GenerateConfig for OpenVLA-OFT.
     """
     cfg = GenerateConfigFineTuned(**config)
+    cfg.pretrained_checkpoint_finetuned = config['pretrained_checkpoint'] 
 
     return cfg
-
