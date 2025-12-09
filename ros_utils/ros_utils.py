@@ -23,7 +23,7 @@ class ROSInterface(Node):
 
         # Subscribers
         self.sub_full = self.create_subscription(
-            Image, "/tripod_2/color/image_raw", self._full_cam_cb, 10 # "/tripod_2/rgb" for libero setup 
+            Image, "/tripod_2/color/image_raw", self._full_cam_cb, 10 #    /overhead/color/image_raw
         )
         self.sub_wrist = self.create_subscription(
             Image, "/wrist/rgb", self._wrist_cam_cb, 10 # /wrist/color/image_raw for libero setup

@@ -38,7 +38,7 @@ def generate_video(images, ee_pos, ee_ori, actions, output_file, fps=20):
             f"Ori: [{ori[0]:.2f}, {ori[1]:.2f}, {ori[2]:.2f}]\n"
             f"Action: [{', '.join(f'{a:.2f}' for a in act)}]"
         )
-        ax.text(5, 20, text, color="yellow", fontsize=10, backgroundcolor="black")
+        # ax.text(5, 20, text, color="yellow", fontsize=10, backgroundcolor="black")
         ax.set_title(f"Frame {i}")
         ax.axis("off")
 
@@ -65,7 +65,7 @@ for task_idx, fname in enumerate(hdf5_files):
 
         for demo_idx, demo_key in enumerate(selected_demos):
             demo = h5["data"][demo_key]
-            images = np.asarray(demo["obs"]["agentview_rgb"])[:, ::-1, ::-1]
+            images = np.asarray(demo["obs"]["eye_in_hand_rgb"])[:, ::-1, ::-1] #eye_in_hand_rgb for hand camera
             actions = np.asarray(demo["actions"])
             ee_pos = np.asarray(demo["obs"]["ee_pos"])
             ee_ori = np.asarray(demo["obs"]["ee_ori"])

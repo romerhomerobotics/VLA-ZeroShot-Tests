@@ -20,6 +20,9 @@ from experiments.robot.openvla_utils import (
 from experiments.robot.robot_utils import get_action
 from prismatic.vla.constants import PROPRIO_DIM
 
+from transformers import AutoModelForVision2Seq
+
+
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.NullHandler())
 
@@ -74,64 +77,89 @@ class OpenVLAOFTModel:
     def _load_finetuned_model(self, ckpt_dir):
         logger.info(f"[OpenVLA-OFT] Loading FINETUNED model from: {ckpt_dir}")
 
-        # Step 1: Load base architecture WITHOUT weights
-        base_vla = get_vla_ft(self.cfg)
+        # ---------------------------------------------------------
+        # 1. Detect MERGED model (full weights)
+        # ---------------------------------------------------------
+        merged_shards = glob.glob(os.path.join(ckpt_dir, "loar_adapter"))
 
-        # Step 2: Apply LoRA adapter
-        lora_path = os.path.join(ckpt_dir, "lora_adapter")
-        if not os.path.isdir(lora_path):
-            raise FileNotFoundError(f"Missing LoRA adapter: {lora_path}")
+        is_merged = len(merged_shards) == 0
+        if is_merged:
+            logger.info("[OpenVLA-OFT] Detected MERGED checkpoint (full model weights).")
 
-        self.vla = PeftModel.from_pretrained(
-            base_vla,
-            lora_path,
-            torch_dtype=torch.float16,
-            is_trainable=False,
-        )
+            # Load full merged VLA model
+            self.vla = AutoModelForVision2Seq.from_pretrained(
+                ckpt_dir,
+                torch_dtype=torch.bfloat16,
+                trust_remote_code=True,
+                low_cpu_mem_usage=True,
+            )
+            self.vla.eval().cuda()
+
+            # Append dataset statistics the norm_stats
+            import json
+            with open(os.path.join(ckpt_dir, 'dataset_statistics.json'),'r') as f:
+                stats = json.load(f)
+
+            self.vla.norm_stats[list(stats.keys())[0]] = stats[list(stats.keys())[0]]
+
+            # Processor
+            self.processor = get_processor(self.cfg)
+
+            # No separate heads needed
+            self.action_head = None
+            self.proprio_projector = None
+
+            logger.info("[OpenVLA-OFT] Loaded merged model successfully (no extra heads).")
+            return
+
+        # ---------------------------------------------------------
+        # 2. Otherwise → LoRA finetune directory with separate heads
+        # ---------------------------------------------------------
+        logger.info("[OpenVLA-OFT] Detected non-merged checkpoint (LoRA + separate heads).")
+
+        # Load base model + LoRA
+        self.vla = get_vla(self.cfg, override_dir=ckpt_dir)
         self.vla.eval()
 
-        # Step 3: Load processor/tokenizer from fine-tuned directory
-        self.processor = get_processor(self.cfg,)
+        # Processor
+        self.processor = get_processor(self.cfg)
 
-        # Step 4: Load trained action head
-        # Use glob to find the action head checkpoint file dynamically
+        # ------------------------------
+        # Load action head
+        # ------------------------------
         ah_pattern = os.path.join(ckpt_dir, "action_head--*_checkpoint.pt")
         ah_paths = glob.glob(ah_pattern)
-
         if not ah_paths:
-            raise FileNotFoundError(f"Missing action head checkpoint matching pattern: {ah_pattern}")
-        
-        # Assume the first match is the desired file (or you can sort/select the latest)
-        ah_path = ah_paths[0] 
-        logger.info(f"[OpenVLA-OFT] Using Action Head checkpoint: {os.path.basename(ah_path)}")
+            raise FileNotFoundError(f"Missing action head checkpoint: {ah_pattern}")
+
+        ah_path = ah_paths[0]
+        logger.info(f"[OpenVLA-OFT] Loading Action Head: {os.path.basename(ah_path)}")
 
         self.action_head = get_action_head(self.cfg, llm_dim=self.vla.llm_dim)
-        raw_sd = torch.load(ah_path, map_location="cpu")
-        clean_sd = {k.replace("module.", ""): v for k, v in raw_sd.items()}
-        self.action_head.load_state_dict(clean_sd) 
+        sd = torch.load(ah_path, map_location="cpu")
+        self.action_head.load_state_dict({k.replace("module.", ""): v for k, v in sd.items()})
         self.action_head.eval()
 
-        # Step 5: Load proprio projector
-        # Use glob to find the proprio projector checkpoint file dynamically
+        # ------------------------------
+        # Load proprio projector
+        # ------------------------------
         pp_pattern = os.path.join(ckpt_dir, "proprio_projector--*_checkpoint.pt")
         pp_paths = glob.glob(pp_pattern)
-
         if not pp_paths:
-            raise FileNotFoundError(f"Missing proprio projector matching pattern: {pp_pattern}")
+            raise FileNotFoundError(f"Missing proprio projector checkpoint: {pp_pattern}")
 
-        # Assume the first match is the desired file
         pp_path = pp_paths[0]
-        logger.info(f"[OpenVLA-OFT] Using Proprio Projector checkpoint: {os.path.basename(pp_path)}")
+        logger.info(f"[OpenVLA-OFT] Loading Proprio Projector: {os.path.basename(pp_path)}")
 
         self.proprio_projector = get_proprio_projector(
             self.cfg, llm_dim=self.vla.llm_dim, proprio_dim=PROPRIO_DIM
         )
-        raw_sd = torch.load(pp_path, map_location="cpu")
-        clean_sd = {k.replace("module.", ""): v for k, v in raw_sd.items()}
-        self.proprio_projector.load_state_dict(clean_sd)
+        sd = torch.load(pp_path, map_location="cpu")
+        self.proprio_projector.load_state_dict({k.replace("module.", ""): v for k, v in sd.items()})
         self.proprio_projector.eval()
 
-        logger.info("[OpenVLA-OFT] Finetuned model loaded successfully.")
+        logger.info("[OpenVLA-OFT] Loaded LoRA finetuned model + heads successfully.")
+
 
     # ----------------------------------------------------------------------
     # RUN INFERENCE
