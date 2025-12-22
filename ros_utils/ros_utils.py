@@ -23,10 +23,10 @@ class ROSInterface(Node):
 
         # Subscribers
         self.sub_full = self.create_subscription(
-            Image, "/tripod_2/color/image_raw", self._full_cam_cb, 10 #    /overhead/color/image_raw
+            Image, "/camera_front/rgb", self._full_cam_cb, 10 #    /overhead/color/image_raw
         )
         self.sub_wrist = self.create_subscription(
-            Image, "/wrist/rgb", self._wrist_cam_cb, 10 # /wrist/color/image_raw for libero setup
+            Image, "/camera_hand/rgb", self._wrist_cam_cb, 10 # /wrist/color/image_raw for libero setup
         )
         self.sub_tf = self.create_subscription(
             TFMessage, "/tf", self._proprio_cb, 10
@@ -36,6 +36,11 @@ class ROSInterface(Node):
         self.pub_action = self.create_publisher(
             Float64MultiArray,
             "/cartesian_delta_command",
+            10
+        )
+        self.pub_action_pose = self.create_publisher(
+            Float64MultiArray,
+            "/cartesian_pose_command",
             10
         )
 
@@ -97,7 +102,7 @@ class ROSInterface(Node):
                     tr = t.transform
                     pos = np.array([tr.translation.x, tr.translation.y, tr.translation.z], dtype=np.float32)
                     quat = np.array([tr.rotation.x, tr.rotation.y, tr.rotation.z, tr.rotation.w], dtype=np.float32)
-                    gripper = np.array([0.0, 0.0], dtype=np.float32)
+                    gripper = np.array([self._latest_gripper], dtype=np.float32)
 
                     proprio = {"eef_pos": pos, "eef_quat": quat, "gr_state": gripper}
                     with self._lock:
@@ -121,6 +126,17 @@ class ROSInterface(Node):
         msg = Float64MultiArray()
         msg.data = action7.tolist()
         self.pub_action.publish(msg)
+
+        # Publish single-float gripper command
+        gmsg = Float64()
+        gmsg.data = float(gripper)
+        self.pub_gripper.publish(gmsg)
+
+    def publish_action_pose(self, action7, gripper):
+        # Publish Cartesian delta / joint vel
+        msg = Float64MultiArray()
+        msg.data = action7.tolist()
+        self.pub_action_pose.publish(msg)
 
         # Publish single-float gripper command
         gmsg = Float64()

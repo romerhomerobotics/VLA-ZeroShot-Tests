@@ -190,28 +190,28 @@ def rotmat_to_quat(R):
         q = np.array([x, y, z, w], dtype=np.float32)
 
     return q / np.linalg.norm(q)
-# Define the same MLP structure as during training
-class PoseMLP(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(7, 64),
-            nn.ReLU(),
-            nn.Linear(64, 64),
-            nn.ReLU(),
-            nn.Linear(64, 7)
-        )
+# # Define the same MLP structure as during training
+# class PoseMLP(nn.Module):
+#     def __init__(self):
+#         super().__init__()
+#         self.net = nn.Sequential(
+#             nn.Linear(7, 64),
+#             nn.ReLU(),
+#             nn.Linear(64, 64),
+#             nn.ReLU(),
+#             nn.Linear(64, 7)
+#         )
 
-    def forward(self, x):
-        out = self.net(x)
-        pos = out[:, :3]
-        quat = out[:, 3:]
-        quat = quat / torch.norm(quat, dim=1, keepdim=True)
-        return torch.cat([pos, quat], dim=1)
+#     def forward(self, x):
+#         out = self.net(x)
+#         pos = out[:, :3]
+#         quat = out[:, 3:]
+#         quat = quat / torch.norm(quat, dim=1, keepdim=True)
+#         return torch.cat([pos, quat], dim=1)
 
-mlp = PoseMLP()
-mlp.load_state_dict(torch.load("publishers/pose_mlp.pt"))
-mlp.eval()
+# mlp = PoseMLP()
+# mlp.load_state_dict(torch.load("publishers/pose_mlp.pt"))
+# mlp.eval()
 
 def run_episode(
     cfg : GenerateConfig,

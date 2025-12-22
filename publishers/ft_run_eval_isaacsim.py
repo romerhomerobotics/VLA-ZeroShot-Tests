@@ -17,6 +17,8 @@ from ros_utils.ros_utils import ROSInterface
 
 from prismatic.vla.constants import NUM_ACTIONS_CHUNK
 
+from scipy.spatial.transform import Rotation as R
+
 import traceback
 
 W_FIRST = False
@@ -62,7 +64,7 @@ def run_episode(
     t = 0
     replay_images = []
 #    max_steps = cfg.TASK_MAX_STEPS
-    max_steps = 1_000
+    max_steps = 2_000
     success = False
     flush = True
 
@@ -72,7 +74,7 @@ def run_episode(
 
             # Get latest sensor data
             full_image, wrist_image, raw_proprio, gripper = ros.get_latest()
-            if full_image is None or raw_proprio is None or gripper is None:
+            if full_image is None or raw_proprio is None or gripper is None or wrist_image is None:
                 print("Waiting for data")
                 continue  # wait for valid data
 
@@ -86,7 +88,7 @@ def run_episode(
             proprio = {
                 "eef_pos": pos,
                 "eef_quat": quat,
-                "gr_state": np.array([0, gripper])
+                "gr_state": np.array([gripper])
             }
 
             # Prepare observation
@@ -110,19 +112,28 @@ def run_episode(
             action = action_queue.popleft()
             action_gripper = action[-1]
             action_gripper = normalize_gripper(action_gripper)
-            # Clip actions
-            # norm = np.linalg.norm(action)
-            # if norm > 0.2:
-                # action = action * (0.2 / norm)
+
+            # Add actions to eef pos and quat
+            delta_pos = action[0:3]
+            # Model outputs rpy deltas, convert to quat delta
+            delta_rpy = action[3:6]
+            eef_rpy = R.from_quat(quat).as_euler('xyz', degrees=False)
+            new_rpy = eef_rpy + delta_rpy
+            new_quat = R.from_euler('xyz', new_rpy, degrees=False).as_quat()
+            # new_quat = new_quat / np.linalg.norm(new_quat)
+            new_pos = pos + delta_pos
+            action = np.concatenate([new_pos, new_quat])
+
 
             # Publish to ROS
-            ros.publish_action(action, action_gripper)
+            ros.publish_action_pose(action, action_gripper)
 
             t += 1
 
     except Exception as e:
         print("Episode terminated with error:")
         traceback.print_exc()
+        raise
 
     return success, replay_images
 
@@ -143,7 +154,7 @@ def eval_libero():
     ros = ROSInterface()
 
     resize_size = get_image_resize_size(cfg)
-    task_description = "Pick up the mustard"
+    task_description = "Pick up the apple and place into basket"
 
     success, replay_images = run_episode(cfg, model, resize_size, ros, task_description)
 

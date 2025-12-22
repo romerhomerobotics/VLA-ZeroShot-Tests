@@ -20,12 +20,36 @@ from experiments.robot.openvla_utils import (
 from experiments.robot.robot_utils import get_action
 from prismatic.vla.constants import PROPRIO_DIM
 
+print("Overwrite proprio dim")
+PROPRIO_DIM = 7
+
 from transformers import AutoModelForVision2Seq
 
 
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.NullHandler())
 
+import types
+import torch
+
+def fixed_process_vision_features(self, pixel_values, language_embeddings, use_film):
+    """
+    Custom method to handle 12-channel (2-image) input by reshaping.
+    """
+    if pixel_values.shape[1] == 12:
+        # Reshape (Batch, 12, H, W) -> (Batch*2, 6, H, W)
+        b, c, h, w = pixel_values.shape
+        pixel_values_reshaped = pixel_values.view(b * 2, 6, h, w)
+        
+        # Pass through backbone
+        patch_features = self.vision_backbone(pixel_values_reshaped) 
+        
+        # Reshape back: (Batch*2, Seq, Dim) -> (Batch, Seq*2, Dim)
+        patch_features = patch_features.view(b, -1, patch_features.shape[-1])
+        return patch_features
+    else:
+        # Fallback to original logic for single images
+        return self.vision_backbone(pixel_values)
 
 class OpenVLAOFTModel:
     """
@@ -81,8 +105,8 @@ class OpenVLAOFTModel:
         # 1. Detect MERGED model (full weights)
         # ---------------------------------------------------------
         merged_shards = glob.glob(os.path.join(ckpt_dir, "loar_adapter"))
-
-        is_merged = len(merged_shards) == 0
+        #TODO
+        is_merged = False # Will put this into the config 
         if is_merged:
             logger.info("[OpenVLA-OFT] Detected MERGED checkpoint (full model weights).")
 
@@ -91,11 +115,12 @@ class OpenVLAOFTModel:
                 ckpt_dir,
                 torch_dtype=torch.bfloat16,
                 trust_remote_code=True,
+                local_files_only=True,
                 low_cpu_mem_usage=True,
             )
             self.vla.eval().cuda()
 
-            # Append dataset statistics the norm_stats
+            # Append deataset statistics the norm_stats
             import json
             with open(os.path.join(ckpt_dir, 'dataset_statistics.json'),'r') as f:
                 stats = json.load(f)
@@ -118,7 +143,7 @@ class OpenVLAOFTModel:
         logger.info("[OpenVLA-OFT] Detected non-merged checkpoint (LoRA + separate heads).")
 
         # Load base model + LoRA
-        self.vla = get_vla(self.cfg, override_dir=ckpt_dir)
+        self.vla = get_vla(self.cfg)
         self.vla.eval()
 
         # Processor
