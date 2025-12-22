@@ -1,0 +1,13 @@
+{ 
+    "pretrained_checkpoint": "/home/homerobotics/model_weights/fine_tuned_vla/openvla_oft/orange60/4/openvla+orange60+b4+lr-0.0001+lora-r32+dropout-0.0--image_aug--parallel_dec--8_acts_chunk--continuous_acts--L1_regression--3rd_person_img--wrist_img--proprio_state--8000_chkpt",
+    "use_l1_regression": true,
+    "use_diffusion":false,
+    "use_film":false,
+    "num_images_in_input":2,
+    "use_proprio": true,
+    "load_in_8bit":false,
+    "load_in_4bit": false,
+    "center_crop": true,
+    "num_open_loop_steps":8,
+    "unnorm_key":"orange60" 
+}
