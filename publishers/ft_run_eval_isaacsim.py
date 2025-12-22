@@ -64,7 +64,7 @@ def run_episode(
     t = 0
     replay_images = []
 #    max_steps = cfg.TASK_MAX_STEPS
-    max_steps = 2_000
+    max_steps = 1_250
     success = False
     flush = True
 
@@ -115,6 +115,10 @@ def run_episode(
 
             # Add actions to eef pos and quat
             delta_pos = action[0:3]
+            z_limit = 0.09 # in meters, even the length of the gripper is about 0.1 m, so set it higher than 0.1 m
+            if pos[2] <= z_limit: # set z delta to 0 if starting z position is less than 2cm from the base to prevent collision with table
+                print(f"z less than limit {z_limit:0.2f}, pos: ", pos)
+                delta_pos[2] = 0.02
             # Model outputs rpy deltas, convert to quat delta
             delta_rpy = action[3:6]
             eef_rpy = R.from_quat(quat).as_euler('xyz', degrees=False)
@@ -154,7 +158,7 @@ def eval_libero():
     ros = ROSInterface()
 
     resize_size = get_image_resize_size(cfg)
-    task_description = "Pick up the apple and place into basket"
+    task_description = "pick up the orange and place it in the grey basket" # "Pick up mustard" # 
 
     success, replay_images = run_episode(cfg, model, resize_size, ros, task_description)
 
