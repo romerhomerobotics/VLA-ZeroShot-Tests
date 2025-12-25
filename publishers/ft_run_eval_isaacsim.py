@@ -64,7 +64,7 @@ def run_episode(
     t = 0
     replay_images = []
 #    max_steps = cfg.TASK_MAX_STEPS
-    max_steps = 1_250
+    max_steps = 800
     success = False
     flush = True
 
@@ -158,7 +158,7 @@ def eval_libero():
     ros = ROSInterface()
 
     resize_size = get_image_resize_size(cfg)
-    task_description = "pick up the orange and place it in the grey basket" # "Pick up mustard" # 
+    task_description = "pick up the apple and place it in the grey basket" # "Pick up mustard" # 
 
     success, replay_images = run_episode(cfg, model, resize_size, ros, task_description)
 

@@ -9,6 +9,7 @@ import os
 import glob
 import torch
 from peft import PeftModel
+import json
 
 from experiments.robot.openvla_utils import (
     get_vla,
@@ -99,91 +100,90 @@ class OpenVLAOFTModel:
     # LOAD FINE-TUNED MODEL
     # ----------------------------------------------------------------------
     def _load_finetuned_model(self, ckpt_dir):
-        logger.info(f"[OpenVLA-OFT] Loading FINETUNED model from: {ckpt_dir}")
+        logger.info(f"[OpenVLA-OFT] Loading model from: {ckpt_dir}")
 
-        # ---------------------------------------------------------
-        # 1. Detect MERGED model (full weights)
-        # ---------------------------------------------------------
-        merged_shards = glob.glob(os.path.join(ckpt_dir, "loar_adapter"))
-        #TODO
-        is_merged = False # Will put this into the config 
-        if is_merged:
-            logger.info("[OpenVLA-OFT] Detected MERGED checkpoint (full model weights).")
+        # 1. Determine if we are loading a merged or un-merged model
+        # Usually, merged models contain a 'config.json', 
+        # while LoRA folders contain 'adapter_config.json'kkk   
+        is_lora = False
 
-            # Load full merged VLA model
-            self.vla = AutoModelForVision2Seq.from_pretrained(
-                ckpt_dir,
-                torch_dtype=torch.bfloat16,
-                trust_remote_code=True,
-                local_files_only=True,
-                low_cpu_mem_usage=True,
-            )
-            self.vla.eval().cuda()
+        if not is_lora:
+            # --- PATH A: LOAD MERGED MODEL ---
+            logger.info("[OpenVLA-OFT] Loading MERGED checkpoint (Full Weights).")
+            
+            self.vla = get_vla(self.cfg)
+            # AutoModelForVision2Seq.from_pretrained(
+                # ckpt_dir,
+                # config = self.cfg,
+                # torch_dtype=torch.bfloat16,
+                # low_cpu_mem_usage=True,
+                # local_files_only = True,
+                # trust_remote_code=True
+            # )
+        else:
+            # --- PATH B: LOAD BASE + LORA SEPARATELY ---
+            logger.info("[OpenVLA-OFT] Loading BASE model + LoRA adapter.")
+            # Load the base model first (using path from your config)
+            base_model = get_vla(self.cfg) 
 
-            # Append deataset statistics the norm_stats
-            import json
-            with open(os.path.join(ckpt_dir, 'dataset_statistics.json'),'r') as f:
-                stats = json.load(f)
+            lora_dir = os.path.join(ckpt_dir, "lora_adapter")
 
-            self.vla.norm_stats[list(stats.keys())[0]] = stats[list(stats.keys())[0]]
+            # Wrap with PeftModel to load LoRA weights
+            self.vla = PeftModel.from_pretrained(base_model, lora_dir)
+            # Optional: Merge them in memory now for faster inference
+            # self.vla = self.vla.merge_and_unload()
 
-            # Processor
-            self.processor = get_processor(self.cfg)
-
-            # No separate heads needed
-            self.action_head = None
-            self.proprio_projector = None
-
-            logger.info("[OpenVLA-OFT] Loaded merged model successfully (no extra heads).")
-            return
-
-        # ---------------------------------------------------------
-        # 2. Otherwise → LoRA finetune directory with separate heads
-        # ---------------------------------------------------------
-        logger.info("[OpenVLA-OFT] Detected non-merged checkpoint (LoRA + separate heads).")
-
-        # Load base model + LoRA
-        self.vla = get_vla(self.cfg)
-        self.vla.eval()
-
-        # Processor
+        self.vla.eval().cuda()
         self.processor = get_processor(self.cfg)
 
-        # ------------------------------
-        # Load action head
-        # ------------------------------
-        ah_pattern = os.path.join(ckpt_dir, "action_head--*_checkpoint.pt")
-        ah_paths = glob.glob(ah_pattern)
-        if not ah_paths:
-            raise FileNotFoundError(f"Missing action head checkpoint: {ah_pattern}")
+        # ---------------------------------------------------------
+        # 2. Load External Adaptors (Proprio & Action Head)
+        # ---------------------------------------------------------
+        # NOTE: Even if the VLA is merged, you likely still need these 
+        # if they were trained as separate MLP modules.
 
-        ah_path = ah_paths[0]
-        logger.info(f"[OpenVLA-OFT] Loading Action Head: {os.path.basename(ah_path)}")
-
-        self.action_head = get_action_head(self.cfg, llm_dim=self.vla.llm_dim)
-        sd = torch.load(ah_path, map_location="cpu")
-        self.action_head.load_state_dict({k.replace("module.", ""): v for k, v in sd.items()})
-        self.action_head.eval()
-
-        # ------------------------------
-        # Load proprio projector
-        # ------------------------------
-        pp_pattern = os.path.join(ckpt_dir, "proprio_projector--*_checkpoint.pt")
-        pp_paths = glob.glob(pp_pattern)
-        if not pp_paths:
-            raise FileNotFoundError(f"Missing proprio projector checkpoint: {pp_pattern}")
-
-        pp_path = pp_paths[0]
-        logger.info(f"[OpenVLA-OFT] Loading Proprio Projector: {os.path.basename(pp_path)}")
-
-        self.proprio_projector = get_proprio_projector(
-            self.cfg, llm_dim=self.vla.llm_dim, proprio_dim=PROPRIO_DIM
+        self.action_head = self._load_extra_module(
+            ckpt_dir, "action_head", 
+            get_action_head(self.cfg, llm_dim=self.vla.llm_dim)
         )
-        sd = torch.load(pp_path, map_location="cpu")
-        self.proprio_projector.load_state_dict({k.replace("module.", ""): v for k, v in sd.items()})
-        self.proprio_projector.eval()
 
-        logger.info("[OpenVLA-OFT] Loaded LoRA finetuned model + heads successfully.")
+        self.proprio_projector = self._load_extra_module(
+            ckpt_dir, "proprio_projector", 
+            get_proprio_projector(self.cfg, llm_dim=self.vla.llm_dim, proprio_dim=PROPRIO_DIM)
+        )
+
+        # 3. Handle Dataset Statistics (Crucial for OpenVLA inference)
+        stats_path = os.path.join(ckpt_dir, 'dataset_statistics.json')
+        if os.path.exists(stats_path):
+            with open(stats_path, 'r') as f:
+                stats = json.load(f)
+            # Ensure stats are loaded into the model for normalization
+            if self.cfg.unnorm_key not in list(stats.keys()): 
+                key = list(stats.keys())[0]
+                print(f"Unnorm key {self.cfg.unnorm_key} not found")
+                print(f"Using the default {key}")
+            else:
+                key = self.cfg.unnorm_key
+            self.vla.norm_stats[key] = stats[key]
+            logger.info(f"[OpenVLA-OFT] Loaded normalization stats for: {key}")
+
+
+
+    def _load_extra_module(self, ckpt_dir, prefix, module_instance):
+        """Helper to find and load .pt checkpoints for MLP heads"""
+        pattern = os.path.join(ckpt_dir, f"{prefix}--*_checkpoint.pt")
+        paths = glob.glob(pattern)
+        if not paths:
+            logger.warning(f"No checkpoint found for {prefix}, skipping...")
+            return None
+
+        path = paths[0]
+        logger.info(f"[OpenVLA-OFT] Loading {prefix} from {os.path.basename(path)}")
+        sd = torch.load(path, map_location="cpu")
+        # Clean 'module.' prefix if saved with DataParallel
+        cleaned_sd = {k.replace("module.", ""): v for k, v in sd.items()}
+        module_instance.load_state_dict(cleaned_sd)
+        return module_instance.eval().cuda()
 
 
     # ----------------------------------------------------------------------
