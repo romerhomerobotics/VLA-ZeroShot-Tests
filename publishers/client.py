@@ -93,12 +93,7 @@ async def run_episode_async(
             rclpy.spin_once(ros, timeout_sec=0.01)
 
             full_image, wrist_image, raw_proprio, gripper_state = ros.get_latest()
-            if (
-                full_image is None
-                or raw_proprio is None
-                or gripper_state is None
-                or wrist_image is None
-            ):
+            if full_image is None or raw_proprio is None or gripper_state is None:
                 await asyncio.sleep(0.01)
                 continue
 

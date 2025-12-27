@@ -11,23 +11,28 @@ from experiments.robot.libero.libero_utils import (
 
 
 
-def prepare_observation(image: np.ndarray, 
-                        wrist_image: np.ndarray, 
-                        proprio : Dict[str, np.ndarray], 
-                        resize_size: Union[int, Tuple[int, int]]):
+def prepare_observation(
+    image: np.ndarray,
+    wrist_image: Optional[np.ndarray],
+    proprio: Dict[str, np.ndarray],
+    resize_size: Union[int, Tuple[int, int]],
+):
+    """Prepare observation taken from IsaacSim in the same way as Libero.
 
-    """Prepare observation taken from IsaacSim in the same way as Libero"""
+    If `wrist_image` is None, we build a single-image observation.
+    """
 
     image_resized = resize_image_for_policy(image, resize_size)
-    wrist_image_resized= resize_image_for_policy(wrist_image, resize_size)
-
     observation = {
-        "full_image" : image_resized,
-        "wrist_image" : wrist_image_resized, # commented for the fine-tuned setup
-        "state" : np.concatenate(
-            (proprio["eef_pos"], quat2axisangle(proprio["eef_quat"]), proprio["gr_state"]) 
-        )
+        "full_image": image_resized,
+        "state": np.concatenate(
+            (proprio["eef_pos"], quat2axisangle(proprio["eef_quat"]), proprio["gr_state"])
+        ),
     }
+
+    if wrist_image is not None:
+        wrist_image_resized = resize_image_for_policy(wrist_image, resize_size)
+        observation["wrist_image"] = wrist_image_resized
 
     return observation, image
 
