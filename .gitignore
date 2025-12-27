@@ -9,3 +9,6 @@ rollouts/
 .vscode/
 
 *.mp4
+**/*.err
+**/*.out
+logs/
