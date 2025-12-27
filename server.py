@@ -9,7 +9,6 @@ import json
 from typing import Any, Dict, List, Optional
 
 import numpy as np
-import torch
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from PIL import Image
 import uvicorn
@@ -23,12 +22,9 @@ app = FastAPI()
 
 cfg = get_config()
 set_seed_everywhere(cfg.seed)
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 resize_size = get_image_resize_size(cfg)
 
 model = load_model(cfg)
-model.to(device)
-model.eval()
 
 
 def decode_image(jpeg_bytes: bytes) -> np.ndarray:
@@ -44,8 +40,7 @@ def build_proprio(meta: Dict[str, Any]) -> Dict[str, np.ndarray]:
 
 
 def run_inference(observation: Dict[str, Any], task_description: str) -> List[List[float]]:
-    with torch.no_grad():
-        actions = model.predict_actions(observation, task_description)
+    actions = model.predict_actions(observation, task_description)
     return [np.asarray(a).tolist() for a in actions]
 
 

@@ -12,8 +12,6 @@
 #SBATCH --mail-user=aytac2003@gmail.com
 #SBATCH --mail-type=ALL
 
-set -+u
-pwd
 
 # Activate the OpenVLA-OFT environment (fixed path as requested)
 source "$HOME/miniconda3/etc/profile.d/conda.sh"
