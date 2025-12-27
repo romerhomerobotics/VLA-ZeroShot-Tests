@@ -18,10 +18,11 @@ import websockets
 from experiments.robot.libero.libero_utils import save_rollout_video
 from experiments.robot.robot_utils import set_seed_everywhere
 from ros_utils.ros_utils import ROSInterface
-from vla_utils.ft_config import get_config
 
 W_FIRST = False
 SERVER_URI = "ws://localhost:8000/ws_inference"
+NUM_OPEN_LOOP_STEPS = 8
+DEFAULT_SEED = 7
 
 
 def normalize_gripper(gripper: float) -> float:
@@ -77,12 +78,11 @@ def build_proprio(raw_proprio: Dict[str, Any], gripper: float) -> Dict[str, np.n
 
 
 async def run_episode_async(
-    cfg: Any,
     ros: ROSInterface,
     task_description: str,
     max_steps: int = 800,
 ) -> tuple[bool, List[np.ndarray]]:
-    action_queue = deque(maxlen=cfg.num_open_loop_steps)
+    action_queue = deque(maxlen=NUM_OPEN_LOOP_STEPS)
     replay_images: List[np.ndarray] = []
     t = 0
     success = False
@@ -141,15 +141,13 @@ async def run_episode_async(
 
 
 async def main() -> None:
-    cfg = get_config()
-    set_seed_everywhere(cfg.seed)
+    set_seed_everywhere(DEFAULT_SEED)
     rclpy.init()
     ros = ROSInterface()
 
     task_description = "pick up the apple and place it in the grey basket"
 
     success, replay_images = await run_episode_async(
-        cfg=cfg,
         ros=ros,
         task_description=task_description,
     )
