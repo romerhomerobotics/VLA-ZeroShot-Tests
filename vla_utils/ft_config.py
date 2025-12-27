@@ -43,8 +43,8 @@ def fix_checkpoint_config_on_disk(checkpoint_path: str):
 # --- YOUR CONFIG LOADER ---
 
 #fp = "/home/romer-vla-sim/Workspace/inference_vla/openvla_oft/configs/mix_v2.json"
-fp= "/dl_scratch1/romerhomerobotics/VLA-ZeroShot-Tests/configs/mix_v2_imagelab.json"
-
+#fp= "/dl_scratch1/romerhomerobotics/VLA-ZeroShot-Tests/configs/mix_v2_imagelab.json"
+fp=
 
 # Load the user config file
 with open(fp, "r") as f:
