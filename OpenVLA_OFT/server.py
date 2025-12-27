@@ -35,7 +35,7 @@ task_description = "Pick up the green cube"
 @dataclass
 class GenerateConfig:
     model_family: str = "openvla"
-    pretrained_checkpoint: Union[str, Path] = "/home/romer-vla-sim/model_weights/vla/openvla_oft"
+    pretrained_checkpoint: Union[str, Path] = "/dl_scratch2/romerhomerobotics/fine_tuned_models/runs_orange60_white_tablev2/2/openvla+orange60_white_tablev2+b4+lr-0.0001+lora-r32+dropout-0.0--image_aug--parallel_dec--8_acts_chunk--continuous_acts--L1_regression--3rd_person_img--wrist_img--proprio_state--8000_chkpt"
     use_l1_regression: bool = True
     use_diffusion: bool = False
     num_diffusion_steps_train: int = 50
