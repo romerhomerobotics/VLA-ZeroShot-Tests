@@ -20,6 +20,7 @@ from experiments.robot.robot_utils import set_seed_everywhere
 from ros_utils.ros_utils import ROSInterface
 
 W_FIRST = False
+#SERVER_URI = "ws://144.122.71.14:8000/ws_inference"
 SERVER_URI = "ws://localhost:8000/ws_inference"
 NUM_OPEN_LOOP_STEPS = 8
 DEFAULT_SEED = 7
@@ -48,6 +49,10 @@ async def request_actions(
     proprio: Dict[str, np.ndarray],
     task_description: str,
 ) -> List[List[float]]:
+    # Ensure we always provide two images when the policy expects 2 inputs.
+    if wrist_image is None:
+        wrist_image = full_image
+
     meta = {
         "task_description": task_description,
         "proprio": {
